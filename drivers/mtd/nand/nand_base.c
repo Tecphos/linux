@@ -31,6 +31,10 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#define FUNCTION_START pr_debug("Fun %s line %d: FUNCTION_START\n", __func__, __LINE__);
+#define FUNCTION_STOP pr_debug("Fun %s line %d: FUNCTION_STOP\n", __func__, __LINE__);
+#define FUNCTION_TRACE pr_debug("Fun %s line %d: FUNCTION_TRACE\n", __func__, __LINE__);
+
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/errno.h>
@@ -324,6 +328,8 @@ static int nand_block_bad(struct mtd_info *mtd, loff_t ofs, int getchip)
 	struct nand_chip *chip = mtd->priv;
 	u16 bad;
 
+FUNCTION_START
+
 	if (chip->bbt_options & NAND_BBT_SCANLASTPAGE)
 		ofs += mtd->erasesize - mtd->writesize;
 
@@ -367,6 +373,8 @@ static int nand_block_bad(struct mtd_info *mtd, loff_t ofs, int getchip)
 		nand_release_device(mtd);
 	}
 
+FUNCTION_STOP
+
 	return res;
 }
 
@@ -385,6 +393,8 @@ static int nand_default_block_markbad(struct mtd_info *mtd, loff_t ofs)
 	struct mtd_oob_ops ops;
 	uint8_t buf[2] = { 0, 0 };
 	int ret = 0, res, i = 0;
+
+FUNCTION_START
 
 	memset(&ops, 0, sizeof(ops));
 	ops.oobbuf = buf;
@@ -409,6 +419,7 @@ static int nand_default_block_markbad(struct mtd_info *mtd, loff_t ofs)
 		ofs += mtd->writesize;
 	} while ((chip->bbt_options & NAND_BBT_SCAN2NDPAGE) && i < 2);
 
+FUNCTION_STOP
 	return ret;
 }
 
@@ -434,6 +445,7 @@ static int nand_block_markbad_lowlevel(struct mtd_info *mtd, loff_t ofs)
 	struct nand_chip *chip = mtd->priv;
 	int res, ret = 0;
 
+FUNCTION_START
 	if (!(chip->bbt_options & NAND_BBT_NO_OOB_BBM)) {
 		struct erase_info einfo;
 
@@ -460,6 +472,7 @@ static int nand_block_markbad_lowlevel(struct mtd_info *mtd, loff_t ofs)
 	if (!ret)
 		mtd->ecc_stats.badblocks++;
 
+FUNCTION_STOP
 	return ret;
 }
 
@@ -515,6 +528,7 @@ static int nand_block_checkbad(struct mtd_info *mtd, loff_t ofs, int getchip,
 {
 	struct nand_chip *chip = mtd->priv;
 
+FUNCTION_START
 	if (!chip->bbt)
 		return chip->block_bad(mtd, ofs, getchip);
 
@@ -535,6 +549,7 @@ static void panic_nand_wait_ready(struct mtd_info *mtd, unsigned long timeo)
 	struct nand_chip *chip = mtd->priv;
 	int i;
 
+FUNCTION_START
 	/* Wait for the device to get ready */
 	for (i = 0; i < timeo; i++) {
 		if (chip->dev_ready(mtd))
@@ -542,6 +557,7 @@ static void panic_nand_wait_ready(struct mtd_info *mtd, unsigned long timeo)
 		touch_softlockup_watchdog();
 		mdelay(1);
 	}
+FUNCTION_STOP
 }
 
 /* Wait for the ready pin, after a command. The timeout is caught later. */
@@ -550,6 +566,7 @@ void nand_wait_ready(struct mtd_info *mtd)
 	struct nand_chip *chip = mtd->priv;
 	unsigned long timeo = jiffies + msecs_to_jiffies(20);
 
+FUNCTION_START
 	/* 400ms timeout */
 	if (in_interrupt() || oops_in_progress)
 		return panic_nand_wait_ready(mtd, 400);
@@ -562,6 +579,8 @@ void nand_wait_ready(struct mtd_info *mtd)
 		touch_softlockup_watchdog();
 	} while (time_before(jiffies, timeo));
 	led_trigger_event(nand_led_trigger, LED_OFF);
+
+FUNCTION_STOP
 }
 EXPORT_SYMBOL_GPL(nand_wait_ready);
 
@@ -576,12 +595,14 @@ static void nand_wait_status_ready(struct mtd_info *mtd, unsigned long timeo)
 {
 	register struct nand_chip *chip = mtd->priv;
 
+FUNCTION_START
 	timeo = jiffies + msecs_to_jiffies(timeo);
 	do {
 		if ((chip->read_byte(mtd) & NAND_STATUS_READY))
 			break;
 		touch_softlockup_watchdog();
 	} while (time_before(jiffies, timeo));
+FUNCTION_STOP
 };
 
 /**
@@ -600,6 +621,7 @@ static void nand_command(struct mtd_info *mtd, unsigned int command,
 	register struct nand_chip *chip = mtd->priv;
 	int ctrl = NAND_CTRL_CLE | NAND_CTRL_CHANGE;
 
+FUNCTION_START
 	/* Write out the command to the device */
 	if (command == NAND_CMD_SEQIN) {
 		int readcmd;
@@ -674,6 +696,7 @@ static void nand_command(struct mtd_info *mtd, unsigned int command,
 		 */
 		if (!chip->dev_ready) {
 			udelay(chip->chip_delay);
+FUNCTION_STOP
 			return;
 		}
 	}
@@ -684,6 +707,7 @@ static void nand_command(struct mtd_info *mtd, unsigned int command,
 	ndelay(100);
 
 	nand_wait_ready(mtd);
+FUNCTION_STOP
 }
 
 /**
@@ -701,6 +725,9 @@ static void nand_command_lp(struct mtd_info *mtd, unsigned int command,
 			    int column, int page_addr)
 {
 	register struct nand_chip *chip = mtd->priv;
+FUNCTION_START
+
+	pr_debug("Fun %s line %d: command: 0x%x column: 0x%x page_addr: 0x%x\n", __func__, __LINE__, command, column, page_addr);
 
 	/* Emulate NAND_CMD_READOOB */
 	if (command == NAND_CMD_READOOB) {
@@ -710,6 +737,8 @@ static void nand_command_lp(struct mtd_info *mtd, unsigned int command,
 
 	/* Command latch cycle */
 	chip->cmd_ctrl(mtd, command, NAND_NCE | NAND_CLE | NAND_CTRL_CHANGE);
+
+	pr_debug("Fun %s line %d: latching\n", __func__, __LINE__);
 
 	if (column != -1 || page_addr != -1) {
 		int ctrl = NAND_CTRL_CHANGE | NAND_NCE | NAND_ALE;
@@ -740,6 +769,9 @@ static void nand_command_lp(struct mtd_info *mtd, unsigned int command,
 	 * Program and erase have their own busy handlers status, sequential
 	 * in and status need no delay.
 	 */
+
+	pr_debug("Fun %s line %d: command: 0x%x\n", __func__, __LINE__, command);
+
 	switch (command) {
 
 	case NAND_CMD_CACHEDPROG:
@@ -785,6 +817,7 @@ static void nand_command_lp(struct mtd_info *mtd, unsigned int command,
 		 */
 		if (!chip->dev_ready) {
 			udelay(chip->chip_delay);
+FUNCTION_STOP
 			return;
 		}
 	}
@@ -796,6 +829,7 @@ static void nand_command_lp(struct mtd_info *mtd, unsigned int command,
 	ndelay(100);
 
 	nand_wait_ready(mtd);
+FUNCTION_STOP
 }
 
 /**
@@ -869,6 +903,7 @@ static void panic_nand_wait(struct mtd_info *mtd, struct nand_chip *chip,
 			    unsigned long timeo)
 {
 	int i;
+FUNCTION_START
 	for (i = 0; i < timeo; i++) {
 		if (chip->dev_ready) {
 			if (chip->dev_ready(mtd))
@@ -879,6 +914,7 @@ static void panic_nand_wait(struct mtd_info *mtd, struct nand_chip *chip,
 		}
 		mdelay(1);
 	}
+FUNCTION_STOP
 }
 
 /**
@@ -896,6 +932,7 @@ static int nand_wait(struct mtd_info *mtd, struct nand_chip *chip)
 	int status, state = chip->state;
 	unsigned long timeo = (state == FL_ERASING ? 400 : 20);
 
+FUNCTION_START
 	led_trigger_event(nand_led_trigger, LED_FULL);
 
 	/*
@@ -926,6 +963,7 @@ static int nand_wait(struct mtd_info *mtd, struct nand_chip *chip)
 	status = (int)chip->read_byte(mtd);
 	/* This can happen if in case of timeout or buggy dev_ready */
 	WARN_ON(!(status & NAND_STATUS_READY));
+FUNCTION_STOP
 	return status;
 }
 
@@ -948,6 +986,7 @@ static int __nand_unlock(struct mtd_info *mtd, loff_t ofs,
 	int status, page;
 	struct nand_chip *chip = mtd->priv;
 
+FUNCTION_START
 	/* Submit address of first page to unlock */
 	page = ofs >> chip->page_shift;
 	chip->cmdfunc(mtd, NAND_CMD_UNLOCK1, -1, page & chip->pagemask);
@@ -966,6 +1005,7 @@ static int __nand_unlock(struct mtd_info *mtd, loff_t ofs,
 		ret = -EIO;
 	}
 
+FUNCTION_STOP
 	return ret;
 }
 
@@ -986,6 +1026,7 @@ int nand_unlock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 	pr_debug("%s: start = 0x%012llx, len = %llu\n",
 			__func__, (unsigned long long)ofs, len);
 
+FUNCTION_START
 	if (check_offs_len(mtd, ofs, len))
 		return -EINVAL;
 
@@ -1046,6 +1087,7 @@ int nand_lock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 	int chipnr, status, page;
 	struct nand_chip *chip = mtd->priv;
 
+FUNCTION_START
 	pr_debug("%s: start = 0x%012llx, len = %llu\n",
 			__func__, (unsigned long long)ofs, len);
 
@@ -1114,9 +1156,13 @@ EXPORT_SYMBOL(nand_lock);
 static int nand_read_page_raw(struct mtd_info *mtd, struct nand_chip *chip,
 			      uint8_t *buf, int oob_required, int page)
 {
+FUNCTION_START
 	chip->read_buf(mtd, buf, mtd->writesize);
-	if (oob_required)
+	if (oob_required){
+		pr_debug("Fun %s line %d: Read OOB\n", __func__, __LINE__);
 		chip->read_buf(mtd, chip->oob_poi, mtd->oobsize);
+	}
+FUNCTION_STOP
 	return 0;
 }
 
@@ -1139,6 +1185,7 @@ static int nand_read_page_raw_syndrome(struct mtd_info *mtd,
 	uint8_t *oob = chip->oob_poi;
 	int steps, size;
 
+FUNCTION_START
 	for (steps = chip->ecc.steps; steps > 0; steps--) {
 		chip->read_buf(mtd, buf, eccsize);
 		buf += eccsize;
@@ -1161,6 +1208,7 @@ static int nand_read_page_raw_syndrome(struct mtd_info *mtd,
 	if (size)
 		chip->read_buf(mtd, oob, size);
 
+FUNCTION_STOP
 	return 0;
 }
 
@@ -1184,6 +1232,7 @@ static int nand_read_page_swecc(struct mtd_info *mtd, struct nand_chip *chip,
 	uint32_t *eccpos = chip->ecc.layout->eccpos;
 	unsigned int max_bitflips = 0;
 
+FUNCTION_START
 	chip->ecc.read_page_raw(mtd, chip, buf, 1, page);
 
 	for (i = 0; eccsteps; eccsteps--, i += eccbytes, p += eccsize)
@@ -1206,6 +1255,7 @@ static int nand_read_page_swecc(struct mtd_info *mtd, struct nand_chip *chip,
 			max_bitflips = max_t(unsigned int, max_bitflips, stat);
 		}
 	}
+FUNCTION_STOP
 	return max_bitflips;
 }
 
@@ -1231,6 +1281,7 @@ static int nand_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 	int index;
 	unsigned int max_bitflips = 0;
 
+FUNCTION_START
 	/* Column address within the page aligned to ECC size (256bytes) */
 	start_step = data_offs / chip->ecc.size;
 	end_step = (data_offs + readlen - 1) / chip->ecc.size;
@@ -1299,6 +1350,7 @@ static int nand_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 			max_bitflips = max_t(unsigned int, max_bitflips, stat);
 		}
 	}
+FUNCTION_STOP
 	return max_bitflips;
 }
 
@@ -1324,6 +1376,7 @@ static int nand_read_page_hwecc(struct mtd_info *mtd, struct nand_chip *chip,
 	uint32_t *eccpos = chip->ecc.layout->eccpos;
 	unsigned int max_bitflips = 0;
 
+FUNCTION_START
 	for (i = 0; eccsteps; eccsteps--, i += eccbytes, p += eccsize) {
 		chip->ecc.hwctl(mtd, NAND_ECC_READ);
 		chip->read_buf(mtd, p, eccsize);
@@ -1348,6 +1401,7 @@ static int nand_read_page_hwecc(struct mtd_info *mtd, struct nand_chip *chip,
 			max_bitflips = max_t(unsigned int, max_bitflips, stat);
 		}
 	}
+FUNCTION_STOP
 	return max_bitflips;
 }
 
@@ -1377,6 +1431,7 @@ static int nand_read_page_hwecc_oob_first(struct mtd_info *mtd,
 	uint8_t *ecc_calc = chip->buffers->ecccalc;
 	unsigned int max_bitflips = 0;
 
+FUNCTION_START
 	/* Read the OOB area first */
 	chip->cmdfunc(mtd, NAND_CMD_READOOB, 0, page);
 	chip->read_buf(mtd, chip->oob_poi, mtd->oobsize);
@@ -1400,6 +1455,7 @@ static int nand_read_page_hwecc_oob_first(struct mtd_info *mtd,
 			max_bitflips = max_t(unsigned int, max_bitflips, stat);
 		}
 	}
+FUNCTION_STOP
 	return max_bitflips;
 }
 
@@ -1424,6 +1480,7 @@ static int nand_read_page_syndrome(struct mtd_info *mtd, struct nand_chip *chip,
 	uint8_t *oob = chip->oob_poi;
 	unsigned int max_bitflips = 0;
 
+FUNCTION_START
 	for (i = 0; eccsteps; eccsteps--, i += eccbytes, p += eccsize) {
 		int stat;
 
@@ -1459,6 +1516,7 @@ static int nand_read_page_syndrome(struct mtd_info *mtd, struct nand_chip *chip,
 	if (i)
 		chip->read_buf(mtd, oob, i);
 
+FUNCTION_STOP
 	return max_bitflips;
 }
 
@@ -1472,6 +1530,7 @@ static int nand_read_page_syndrome(struct mtd_info *mtd, struct nand_chip *chip,
 static uint8_t *nand_transfer_oob(struct nand_chip *chip, uint8_t *oob,
 				  struct mtd_oob_ops *ops, size_t len)
 {
+FUNCTION_START
 	switch (ops->mode) {
 
 	case MTD_OPS_PLACE_OOB:
@@ -1502,11 +1561,13 @@ static uint8_t *nand_transfer_oob(struct nand_chip *chip, uint8_t *oob,
 			memcpy(oob, chip->oob_poi + boffs, bytes);
 			oob += bytes;
 		}
+FUNCTION_STOP
 		return oob;
 	}
 	default:
 		BUG();
 	}
+FUNCTION_STOP
 	return NULL;
 }
 
@@ -1559,8 +1620,11 @@ static int nand_do_read_ops(struct mtd_info *mtd, loff_t from,
 	int retry_mode = 0;
 	bool ecc_fail = false;
 
+FUNCTION_START
 	chipnr = (int)(from >> chip->chip_shift);
 	chip->select_chip(mtd, chipnr);
+
+	pr_debug("Fun %s line %d: chipnr %d\n", __func__, __LINE__, chipnr);
 
 	realpage = (int)(from >> chip->page_shift);
 	page = realpage & chip->pagemask;
@@ -1708,7 +1772,7 @@ read_retry:
 	ops->retlen = ops->len - (size_t) readlen;
 	if (oob)
 		ops->oobretlen = ops->ooblen - oobreadlen;
-
+FUNCTION_STOP
 	if (ret < 0)
 		return ret;
 
@@ -1734,6 +1798,7 @@ static int nand_read(struct mtd_info *mtd, loff_t from, size_t len,
 	struct mtd_oob_ops ops;
 	int ret;
 
+FUNCTION_START
 	nand_get_device(mtd, FL_READING);
 	memset(&ops, 0, sizeof(ops));
 	ops.len = len;
@@ -1742,6 +1807,7 @@ static int nand_read(struct mtd_info *mtd, loff_t from, size_t len,
 	ret = nand_do_read_ops(mtd, from, &ops);
 	*retlen = ops.retlen;
 	nand_release_device(mtd);
+FUNCTION_STOP
 	return ret;
 }
 
@@ -1754,8 +1820,10 @@ static int nand_read(struct mtd_info *mtd, loff_t from, size_t len,
 static int nand_read_oob_std(struct mtd_info *mtd, struct nand_chip *chip,
 			     int page)
 {
+FUNCTION_START
 	chip->cmdfunc(mtd, NAND_CMD_READOOB, 0, page);
 	chip->read_buf(mtd, chip->oob_poi, mtd->oobsize);
+FUNCTION_STOP
 	return 0;
 }
 
@@ -1775,6 +1843,7 @@ static int nand_read_oob_syndrome(struct mtd_info *mtd, struct nand_chip *chip,
 	uint8_t *bufpoi = chip->oob_poi;
 	int i, toread, sndrnd = 0, pos;
 
+FUNCTION_START
 	chip->cmdfunc(mtd, NAND_CMD_READ0, chip->ecc.size, page);
 	for (i = 0; i < chip->ecc.steps; i++) {
 		if (sndrnd) {
@@ -1793,6 +1862,7 @@ static int nand_read_oob_syndrome(struct mtd_info *mtd, struct nand_chip *chip,
 	if (length > 0)
 		chip->read_buf(mtd, bufpoi, length);
 
+FUNCTION_STOP
 	return 0;
 }
 
