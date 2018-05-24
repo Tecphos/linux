@@ -29,6 +29,8 @@
 #include "gpmi-regs.h"
 #include "bch-regs.h"
 
+#define FORCE_SYNC_MODE 1
+
 /* export the bch geometry to dbgfs */
 static struct debugfs_blob_wrapper dbg_bch_geo;
 
@@ -162,6 +164,32 @@ err_clk:
 	return ret;
 }
 
+int enable_sync_mode(struct gpmi_nand_data *this, int  enable)
+{
+	struct resources *r = &this->resources;
+	//void __iomem *gpmi_regs = r->gpmi_regs;
+	uint32_t       reg;
+
+	if (enable) {
+		reg = readl(r->gpmi_regs + HW_GPMI_CTRL1);
+		dev_err(this->dev, "CTRL1 value: 0x%x\n", reg);
+		writel(1<<25, r->gpmi_regs + HW_GPMI_CTRL1_SET);
+		writel(1<<27, r->gpmi_regs + HW_GPMI_CTRL1_SET);
+		reg = readl(r->gpmi_regs + HW_GPMI_CTRL1);
+		dev_err(this->dev, "CTRL1 value: 0x%x\n", reg);
+	}
+	else{
+		reg = readl(r->gpmi_regs + HW_GPMI_CTRL1);
+		dev_err(this->dev, "CTRL1 value: 0x%x\n", reg);
+		writel(1<<25, r->gpmi_regs + HW_GPMI_CTRL1_CLR);
+		writel(1<<27, r->gpmi_regs + HW_GPMI_CTRL1_CLR);
+		reg = readl(r->gpmi_regs + HW_GPMI_CTRL1);
+		dev_err(this->dev, "CTRL1 value: 0x%x\n", reg);
+	}
+
+	return 0;
+}
+
 int gpmi_init(struct gpmi_nand_data *this)
 {
 	struct resources *r = &this->resources;
@@ -204,6 +232,12 @@ int gpmi_init(struct gpmi_nand_data *this)
 	 * the chips.
 	 */
 	writel(BM_GPMI_CTRL1_DECOUPLE_CS, r->gpmi_regs + HW_GPMI_CTRL1_SET);
+
+	//WALTER enable sync mode
+	#ifdef FORCE_SYNC_MODE
+		dev_err(this->dev, "Forcing sync mode\n");
+		enable_sync_mode(this, 1);
+	#endif
 
 	pm_runtime_mark_last_busy(this->dev);
 	pm_runtime_put_autosuspend(this->dev);
