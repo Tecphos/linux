@@ -93,6 +93,8 @@ static int gpmi_reset_block(void __iomem *reset_addr, bool just_enable)
 	int ret;
 	int timeout = 0x400;
 
+FUNCTION_START
+
 	/* clear and poll SFTRST */
 	ret = clear_poll_bit(reset_addr, MODULE_SFTRST);
 	if (unlikely(ret))
@@ -123,10 +125,13 @@ static int gpmi_reset_block(void __iomem *reset_addr, bool just_enable)
 	if (unlikely(ret))
 		goto error;
 
+FUNCTION_STOP
+
 	return 0;
 
 error:
 	pr_err("%s(%p): module reset timeout\n", __func__, reset_addr);
+FUNCTION_STOP
 	return -ETIMEDOUT;
 }
 
@@ -1054,6 +1059,7 @@ void gpmi_begin(struct gpmi_nand_data *this)
 	struct gpmi_nfc_hardware_timing  hw;
 	int ret;
 
+FUNCTION_START
 	/* Enable the clock. */
 	ret = pm_runtime_get_sync(this->dev);
 	if (ret < 0) {
@@ -1062,8 +1068,10 @@ void gpmi_begin(struct gpmi_nand_data *this)
 	}
 
 	/* Only initialize the timing once */
-	if (this->flags & GPMI_TIMING_INIT_OK)
+	if (this->flags & GPMI_TIMING_INIT_OK){
+FUNCTION_STOP
 		return;
+	}
 	this->flags |= GPMI_TIMING_INIT_OK;
 
 	if (this->flags & GPMI_ASYNC_EDO_ENABLED)
@@ -1097,8 +1105,10 @@ void gpmi_begin(struct gpmi_nand_data *this)
 	writel(reg, gpmi_regs + HW_GPMI_CTRL1_CLR);
 
 	/* If no sample delay is called for, return immediately. */
-	if (!hw.sample_delay_factor)
+	if (!hw.sample_delay_factor){
+FUNCTION_STOP
 		return;
+	}
 
 	/* Set RDN_DELAY or HALF_PERIOD. */
 	reg = ((hw.use_half_periods) ? BM_GPMI_CTRL1_HALF_PERIOD : 0)
@@ -1124,6 +1134,7 @@ void gpmi_begin(struct gpmi_nand_data *this)
 	udelay(dll_wait_time_in_us);
 
 err_out:
+FUNCTION_STOP
 	return;
 }
 
@@ -1147,6 +1158,8 @@ int gpmi_is_ready(struct gpmi_nand_data *this, unsigned chip)
 	uint32_t mask = 0;
 	uint32_t reg = 0;
 
+FUNCTION_START
+
 	if (GPMI_IS_MX23(this)) {
 		mask = MX23_BM_GPMI_DEBUG_READY0 << chip;
 		reg = readl(r->gpmi_regs + HW_GPMI_DEBUG);
@@ -1164,6 +1177,10 @@ int gpmi_is_ready(struct gpmi_nand_data *this, unsigned chip)
 		reg = readl(r->gpmi_regs + HW_GPMI_STAT);
 	} else
 		dev_err(this->dev, "unknown arch.\n");
+
+	pr_debug("Fun %s line %d: reg: %x mask: %x\n", __func__, __LINE__, reg, mask);
+FUNCTION_STOP
+
 	return reg & mask;
 }
 
@@ -1182,6 +1199,7 @@ int gpmi_send_command(struct gpmi_nand_data *this)
 	int chip = this->current_chip;
 	u32 pio[3];
 
+FUNCTION_START
 	/* [1] send out the PIO words */
 	pio[0] = BF_GPMI_CTRL0_COMMAND_MODE(BV_GPMI_CTRL0_COMMAND_MODE__WRITE)
 		| BM_GPMI_CTRL0_WORD_LENGTH
@@ -1194,8 +1212,10 @@ int gpmi_send_command(struct gpmi_nand_data *this)
 	desc = dmaengine_prep_slave_sg(channel,
 					(struct scatterlist *)pio,
 					ARRAY_SIZE(pio), DMA_TRANS_NONE, 0);
-	if (!desc)
+	if (!desc){
+FUNCTION_STOP
 		return -EINVAL;
+	}
 
 	/* [2] send out the COMMAND + ADDRESS string stored in @buffer */
 	sgl = &this->cmd_sgl;
@@ -1205,11 +1225,13 @@ int gpmi_send_command(struct gpmi_nand_data *this)
 	desc = dmaengine_prep_slave_sg(channel,
 				sgl, 1, DMA_MEM_TO_DEV,
 				DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
-	if (!desc)
+	if (!desc){
+FUNCTION_STOP
 		return -EINVAL;
-
+	}
 	/* [3] submit the DMA */
 	set_dma_type(this, DMA_FOR_COMMAND);
+FUNCTION_STOP
 	return start_dma_without_bch_irq(this, desc);
 }
 
@@ -1222,6 +1244,7 @@ int gpmi_send_data(struct gpmi_nand_data *this)
 	uint32_t address;
 	u32 pio[2];
 
+FUNCTION_START
 	/* [1] PIO */
 	command_mode = BV_GPMI_CTRL0_COMMAND_MODE__WRITE;
 	address      = BV_GPMI_CTRL0_ADDRESS__NAND_DATA;
@@ -1235,19 +1258,24 @@ int gpmi_send_data(struct gpmi_nand_data *this)
 	pio[1] = 0;
 	desc = dmaengine_prep_slave_sg(channel, (struct scatterlist *)pio,
 					ARRAY_SIZE(pio), DMA_TRANS_NONE, 0);
-	if (!desc)
+	if (!desc){
+FUNCTION_STOP
 		return -EINVAL;
+	}
 
 	/* [2] send DMA request */
 	prepare_data_dma(this, DMA_TO_DEVICE);
 	desc = dmaengine_prep_slave_sg(channel, &this->data_sgl,
 					1, DMA_MEM_TO_DEV,
 					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
-	if (!desc)
+	if (!desc){
+FUNCTION_STOP
 		return -EINVAL;
+	}
 
 	/* [3] submit the DMA */
 	set_dma_type(this, DMA_FOR_WRITE_DATA);
+FUNCTION_STOP
 	return start_dma_without_bch_irq(this, desc);
 }
 
@@ -1258,6 +1286,7 @@ int gpmi_read_data(struct gpmi_nand_data *this)
 	int chip = this->current_chip;
 	u32 pio[2];
 
+FUNCTION_START
 	/* [1] : send PIO */
 	pio[0] = BF_GPMI_CTRL0_COMMAND_MODE(BV_GPMI_CTRL0_COMMAND_MODE__READ)
 		| BM_GPMI_CTRL0_WORD_LENGTH
@@ -1269,19 +1298,24 @@ int gpmi_read_data(struct gpmi_nand_data *this)
 	desc = dmaengine_prep_slave_sg(channel,
 					(struct scatterlist *)pio,
 					ARRAY_SIZE(pio), DMA_TRANS_NONE, 0);
-	if (!desc)
+	if (!desc){
+FUNCTION_STOP
 		return -EINVAL;
+	}
 
 	/* [2] : send DMA request */
 	prepare_data_dma(this, DMA_FROM_DEVICE);
 	desc = dmaengine_prep_slave_sg(channel, &this->data_sgl,
 					1, DMA_DEV_TO_MEM,
 					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
-	if (!desc)
+	if (!desc){
+FUNCTION_STOP
 		return -EINVAL;
+	}
 
 	/* [3] : submit the DMA */
 	set_dma_type(this, DMA_FOR_READ_DATA);
+FUNCTION_STOP
 	return start_dma_without_bch_irq(this, desc);
 }
 
@@ -1298,6 +1332,7 @@ int gpmi_send_page(struct gpmi_nand_data *this,
 	int chip = this->current_chip;
 	u32 pio[6];
 
+FUNCTION_START
 	/* A DMA descriptor that does an ECC page read. */
 	command_mode = BV_GPMI_CTRL0_COMMAND_MODE__WRITE;
 	address      = BV_GPMI_CTRL0_ADDRESS__NAND_DATA;
@@ -1323,10 +1358,13 @@ int gpmi_send_page(struct gpmi_nand_data *this,
 					(struct scatterlist *)pio,
 					ARRAY_SIZE(pio), DMA_TRANS_NONE,
 					DMA_CTRL_ACK);
-	if (!desc)
+	if (!desc){
+FUNCTION_STOP
 		return -EINVAL;
+	}
 
 	set_dma_type(this, DMA_FOR_WRITE_ECC_PAGE);
+FUNCTION_STOP
 	return start_dma_with_bch_irq(this, desc);
 }
 
@@ -1343,6 +1381,8 @@ int gpmi_read_page(struct gpmi_nand_data *this,
 	int chip = this->current_chip;
 	u32 pio[6];
 
+FUNCTION_START
+
 	/* [1] Wait for the chip to report ready. */
 	command_mode = BV_GPMI_CTRL0_COMMAND_MODE__WAIT_FOR_READY;
 	address      = BV_GPMI_CTRL0_ADDRESS__NAND_DATA;
@@ -1357,8 +1397,10 @@ int gpmi_read_page(struct gpmi_nand_data *this,
 	desc = dmaengine_prep_slave_sg(channel,
 				(struct scatterlist *)pio, 2,
 				DMA_TRANS_NONE, 0);
-	if (!desc)
+	if (!desc){
+FUNCTION_STOP
 		return -EINVAL;
+	}
 
 	/* [2] Enable the BCH block and read. */
 	command_mode = BV_GPMI_CTRL0_COMMAND_MODE__READ;
@@ -1385,8 +1427,10 @@ int gpmi_read_page(struct gpmi_nand_data *this,
 					(struct scatterlist *)pio,
 					ARRAY_SIZE(pio), DMA_TRANS_NONE,
 					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
-	if (!desc)
+	if (!desc){
+FUNCTION_STOP
 		return -EINVAL;
+	}
 
 	/* [3] Disable the BCH block */
 	command_mode = BV_GPMI_CTRL0_COMMAND_MODE__WAIT_FOR_READY;
@@ -1404,11 +1448,14 @@ int gpmi_read_page(struct gpmi_nand_data *this,
 				(struct scatterlist *)pio, 3,
 				DMA_TRANS_NONE,
 				DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
-	if (!desc)
+	if (!desc){
+FUNCTION_STOP
 		return -EINVAL;
+	}
 
 	/* [4] submit the DMA */
 	set_dma_type(this, DMA_FOR_READ_ECC_PAGE);
+FUNCTION_STOP
 	return start_dma_with_bch_irq(this, desc);
 }
 

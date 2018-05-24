@@ -30,6 +30,14 @@ struct resources {
 	unsigned int  dma_high_channel;
 	struct clk    *clock[GPMI_CLK_MAX];
 };
+#define FUNCTION_START pr_debug("Fun %s line %d: FUNCTION_START\n", __func__, __LINE__);
+#define FUNCTION_STOP pr_debug("Fun %s line %d: FUNCTION_STOP\n", __func__, __LINE__);
+#define FUNCTION_TRACE pr_debug("Fun %s line %d: FUNCTION_TRACE\n", __func__, __LINE__);
+/*
+#define FUNCTION_START
+#define FUNCTION_STOP
+#define FUNCTION_TRACE
+*/
 
 /**
  * struct bch_geometry - BCH geometry description.

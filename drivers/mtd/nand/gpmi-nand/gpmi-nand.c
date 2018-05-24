@@ -619,6 +619,9 @@ static void dma_irq_callback(void *param)
 	struct gpmi_nand_data *this = param;
 	struct completion *dma_c = &this->dma_done;
 
+FUNCTION_START
+
+	pr_debug("Fun %s line %d: dma_type: %d\n", __func__, __LINE__, this->dma_type);
 	switch (this->dma_type) {
 	case DMA_FOR_COMMAND:
 		dma_unmap_sg(this->dev, &this->cmd_sgl, 1, DMA_TO_DEVICE);
@@ -645,6 +648,7 @@ static void dma_irq_callback(void *param)
 	}
 
 	complete(dma_c);
+FUNCTION_STOP
 }
 
 int start_dma_without_bch_irq(struct gpmi_nand_data *this,
@@ -854,6 +858,7 @@ static int acquire_resources(struct gpmi_nand_data *this)
 	if (ret)
 		goto exit_regs;
 
+	pr_walter("Fun %s line %d: Acquiring BCH int\n", __func__, __LINE__);
 	ret = acquire_bch_irq(this, bch_irq);
 	if (ret)
 		goto exit_regs;
@@ -1082,6 +1087,9 @@ static void gpmi_cmd_ctrl(struct mtd_info *mtd, int data, unsigned int ctrl)
 	struct gpmi_nand_data *this = chip->priv;
 	int ret;
 
+FUNCTION_START
+
+	pr_debug("Fun %s line %d: data: %d ctrl: %d\n", __func__, __LINE__, data, ctrl);
 	/*
 	 * Every operation begins with a command byte and a series of zero or
 	 * more address bytes. These are distinguished by either the Address
@@ -1096,11 +1104,14 @@ static void gpmi_cmd_ctrl(struct mtd_info *mtd, int data, unsigned int ctrl)
 	if ((ctrl & (NAND_ALE | NAND_CLE))) {
 		if (data != NAND_CMD_NONE)
 			this->cmd_buffer[this->command_length++] = data;
+FUNCTION_STOP
 		return;
 	}
 
-	if (!this->command_length)
+	if (!this->command_length){
+FUNCTION_STOP
 		return;
+}
 
 	ret = gpmi_send_command(this);
 	if (ret)
@@ -1108,6 +1119,7 @@ static void gpmi_cmd_ctrl(struct mtd_info *mtd, int data, unsigned int ctrl)
 			this->current_chip, ret);
 
 	this->command_length = 0;
+FUNCTION_STOP
 }
 
 static int gpmi_dev_ready(struct mtd_info *mtd)
@@ -1136,11 +1148,16 @@ static void gpmi_read_buf(struct mtd_info *mtd, uint8_t *buf, int len)
 	struct nand_chip *chip = mtd->priv;
 	struct gpmi_nand_data *this = chip->priv;
 
+FUNCTION_START
+
+	//pr_walter("Fun %s line %d: gpmi_read_buf buf %p len %d\n", __func__, __LINE__, buf, len);
 	dev_dbg(this->dev, "len is %d\n", len);
 	this->upper_buf	= buf;
 	this->upper_len	= len;
 
 	gpmi_read_data(this);
+
+FUNCTION_STOP
 }
 
 static void gpmi_write_buf(struct mtd_info *mtd, const uint8_t *buf, int len)
@@ -1148,11 +1165,15 @@ static void gpmi_write_buf(struct mtd_info *mtd, const uint8_t *buf, int len)
 	struct nand_chip *chip = mtd->priv;
 	struct gpmi_nand_data *this = chip->priv;
 
+FUNCTION_START
+
 	dev_dbg(this->dev, "len is %d\n", len);
 	this->upper_buf	= (uint8_t *)buf;
 	this->upper_len	= len;
 
 	gpmi_send_data(this);
+
+FUNCTION_STOP
 }
 
 static uint8_t gpmi_read_byte(struct mtd_info *mtd)
@@ -1226,6 +1247,7 @@ static bool gpmi_erased_check(struct gpmi_nand_data *this,
 	unsigned int threshold;
 	int i;
 
+FUNCTION_START
 	threshold = geo->gf_len / 2;
 	if (threshold > geo->ecc_strength)
 		threshold = geo->ecc_strength;
@@ -1233,8 +1255,10 @@ static bool gpmi_erased_check(struct gpmi_nand_data *this,
 	/* Count bitflips */
 	for (i = 0; i < geo->ecc_chunkn_size; i++) {
 		flip_bits += hweight8(~data[base + i]);
-		if (flip_bits > threshold)
+		if (flip_bits > threshold){
+FUNCTION_STOP
 			return false;
+		}
 	}
 
 	/*
@@ -1248,8 +1272,10 @@ static bool gpmi_erased_check(struct gpmi_nand_data *this,
 	/* Count the bitflips for the no ECC buffer */
 	for (i = 0; i < mtd->writesize / 8; i++) {
 		flip_bits_noecc += hweight64(~buf[i]);
-		if (flip_bits_noecc > threshold)
+		if (flip_bits_noecc > threshold){
+FUNCTION_STOP
 			return false;
+		}
 	}
 
 	/* Tell the upper layer the bitflips we corrected. */
@@ -1265,6 +1291,7 @@ static bool gpmi_erased_check(struct gpmi_nand_data *this,
 	dev_dbg(this->dev, "The page(%d) is an erased page(%d,%d,%d,%d).\n",
 		page, chunk, threshold, flip_bits, flip_bits_noecc);
 
+FUNCTION_STOP
 	return true;
 }
 
@@ -1284,6 +1311,7 @@ static int gpmi_ecc_read_page(struct mtd_info *mtd, struct nand_chip *chip,
 	int           ret;
 	int flag = 0;
 
+FUNCTION_START
 	dev_dbg(this->dev, "page number is : %d\n", page);
 	ret = read_page_prepare(this, buf, nfc_geo->payload_size,
 					this->payload_virt, this->payload_phys,
@@ -1292,6 +1320,7 @@ static int gpmi_ecc_read_page(struct mtd_info *mtd, struct nand_chip *chip,
 	if (ret) {
 		dev_err(this->dev, "Inadequate DMA buffer\n");
 		ret = -ENOMEM;
+FUNCTION_STOP
 		return ret;
 	}
 	auxiliary_virt = this->auxiliary_virt;
@@ -1305,6 +1334,7 @@ static int gpmi_ecc_read_page(struct mtd_info *mtd, struct nand_chip *chip,
 			payload_virt, payload_phys);
 	if (ret) {
 		dev_err(this->dev, "Error in ECC-based read: %d\n", ret);
+FUNCTION_STOP
 		return ret;
 	}
 
@@ -1361,6 +1391,7 @@ static int gpmi_ecc_read_page(struct mtd_info *mtd, struct nand_chip *chip,
 	if (flag)
 		memset(buf, 0xff, nfc_geo->payload_size);
 
+FUNCTION_STOP
 	return max_bitflips;
 }
 
@@ -1381,6 +1412,7 @@ static int gpmi_ecc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 	int col = 0;
 	int old_swap_block_mark = this->swap_block_mark;
 
+FUNCTION_START
 	/* The size of ECC parity */
 	ecc_parity_size = geo->gf_len * geo->ecc_strength / 8;
 
@@ -1401,6 +1433,7 @@ static int gpmi_ecc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 			dev_dbg(this->dev,
 				"page:%d, first:%d, last:%d, marker at:%d\n",
 				page, first, last, marker_pos);
+FUNCTION_STOP
 			return gpmi_ecc_read_page(mtd, chip, buf, 0, page);
 		}
 	}
@@ -1480,6 +1513,7 @@ static int gpmi_ecc_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
 	this->bch_geometry = old_geo;
 	this->swap_block_mark = old_swap_block_mark;
 
+FUNCTION_STOP
 	return max_bitflips;
 }
 
@@ -1494,6 +1528,7 @@ static int gpmi_ecc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 	dma_addr_t auxiliary_phys;
 	int        ret;
 
+FUNCTION_START
 	dev_dbg(this->dev, "ecc write page.\n");
 	if (this->swap_block_mark) {
 		/*
@@ -1524,6 +1559,7 @@ static int gpmi_ecc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 				nfc_geo->payload_size,
 				&payload_virt, &payload_phys);
 		if (ret) {
+FUNCTION_STOP
 			dev_err(this->dev, "Inadequate payload DMA buffer\n");
 			return 0;
 		}
@@ -1534,6 +1570,7 @@ static int gpmi_ecc_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 				nfc_geo->auxiliary_size,
 				&auxiliary_virt, &auxiliary_phys);
 		if (ret) {
+FUNCTION_STOP
 			dev_err(this->dev, "Inadequate auxiliary DMA buffer\n");
 			goto exit_auxiliary;
 		}
@@ -1556,6 +1593,7 @@ exit_auxiliary:
 				payload_virt, payload_phys);
 	}
 
+FUNCTION_STOP
 	return 0;
 }
 
@@ -1624,6 +1662,7 @@ static int gpmi_ecc_read_oob(struct mtd_info *mtd, struct nand_chip *chip,
 {
 	struct gpmi_nand_data *this = chip->priv;
 
+FUNCTION_START
 	dev_dbg(this->dev, "page number is %d\n", page);
 	/* clear the OOB buffer */
 	memset(chip->oob_poi, ~0, mtd->oobsize);
@@ -1642,7 +1681,7 @@ static int gpmi_ecc_read_oob(struct mtd_info *mtd, struct nand_chip *chip,
 		chip->cmdfunc(mtd, NAND_CMD_READ0, 0, page);
 		chip->oob_poi[0] = chip->read_byte(mtd);
 	}
-
+FUNCTION_STOP
 	return 0;
 }
 
@@ -1651,7 +1690,7 @@ gpmi_ecc_write_oob(struct mtd_info *mtd, struct nand_chip *chip, int page)
 {
 	struct nand_oobfree *of = mtd->ecclayout->oobfree;
 	int status = 0;
-
+FUNCTION_START
 	/* Do we have available oob area? */
 	if (!of->length)
 		return -EPERM;
@@ -1664,6 +1703,7 @@ gpmi_ecc_write_oob(struct mtd_info *mtd, struct nand_chip *chip, int page)
 	chip->cmdfunc(mtd, NAND_CMD_PAGEPROG, -1, -1);
 
 	status = chip->waitfunc(mtd, chip);
+FUNCTION_STOP
 	return status & NAND_STATUS_FAIL ? -EIO : 0;
 }
 
@@ -1695,6 +1735,7 @@ static int gpmi_ecc_read_page_raw(struct mtd_info *mtd,
 	int step;
 	int ecc_chunk_count;
 
+FUNCTION_START
 	chip->read_buf(mtd, tmp_buf,
 		       mtd->writesize + mtd->oobsize);
 
@@ -1764,7 +1805,7 @@ static int gpmi_ecc_read_page_raw(struct mtd_info *mtd,
 			       tmp_buf + mtd->writesize + oob_byte_off,
 			       mtd->oobsize - oob_byte_off);
 	}
-
+FUNCTION_STOP
 	return 0;
 }
 
@@ -1797,6 +1838,7 @@ static int gpmi_ecc_write_page_raw(struct mtd_info *mtd,
 	int step;
 	int ecc_chunk_count;
 
+FUNCTION_START
 	/*
 	 * Initialize all bits to 1 in case we don't have a buffer for the
 	 * payload or oob data in order to leave unspecified bits of data
@@ -1867,6 +1909,7 @@ static int gpmi_ecc_write_page_raw(struct mtd_info *mtd,
 
 	chip->write_buf(mtd, tmp_buf, mtd->writesize + mtd->oobsize);
 
+FUNCTION_STOP
 	return 0;
 }
 
@@ -1894,6 +1937,8 @@ static int gpmi_block_markbad(struct mtd_info *mtd, loff_t ofs)
 	uint8_t *block_mark;
 	int column, page, status, chipnr;
 
+FUNCTION_START
+
 	chipnr = (int)(ofs >> chip->chip_shift);
 	chip->select_chip(mtd, chipnr);
 
@@ -1915,6 +1960,8 @@ static int gpmi_block_markbad(struct mtd_info *mtd, loff_t ofs)
 		ret = -EIO;
 
 	chip->select_chip(mtd, -1);
+
+FUNCTION_STOP
 
 	return ret;
 }
@@ -2282,6 +2329,8 @@ static int gpmi_nand_init(struct gpmi_nand_data *this)
 	dev_dbg(this->dev, "Blockmark swapping %sabled\n",
 		this->swap_block_mark ? "en" : "dis");
 
+	FUNCTION_TRACE
+
 	/*
 	 * Allocate a temporary DMA buffer for reading ID in the
 	 * nand_scan_ident().
@@ -2292,20 +2341,24 @@ static int gpmi_nand_init(struct gpmi_nand_data *this)
 	if (ret)
 		goto err_out;
 
+	FUNCTION_TRACE
 	ret = nand_scan_ident(mtd, GPMI_IS_MX6(this) || GPMI_IS_MX7(this)\
 				? 2 : 1, NULL);
 	if (ret)
 		goto err_out;
 
+	FUNCTION_TRACE
 	ret = gpmi_init_last(this);
 	if (ret)
 		goto err_out;
 
+	FUNCTION_TRACE
 	chip->options |= NAND_SKIP_BBTSCAN;
 	ret = nand_scan_tail(mtd);
 	if (ret)
 		goto err_out;
 
+	FUNCTION_TRACE
 	ret = nand_boot_init(this);
 	if (ret)
 		goto err_out;
@@ -2313,6 +2366,7 @@ static int gpmi_nand_init(struct gpmi_nand_data *this)
 	if (ret)
 		goto err_out;
 
+	FUNCTION_TRACE
 	ppdata.of_node = this->pdev->dev.of_node;
 	ret = mtd_device_parse_register(mtd, NULL, &ppdata, NULL, 0);
 	if (ret)
@@ -2375,22 +2429,27 @@ static int gpmi_nand_probe(struct platform_device *pdev)
 	this->pdev  = pdev;
 	this->dev   = &pdev->dev;
 
+	FUNCTION_TRACE
 	ret = acquire_resources(this);
 	if (ret)
 		goto exit_acquire_resources;
 
+	FUNCTION_TRACE
 	ret = init_rpm(this);
 	if (ret)
 		goto exit_nfc_init;
 
+	FUNCTION_TRACE
 	ret = init_hardware(this);
 	if (ret)
 		goto exit_nfc_init;
 
+	FUNCTION_TRACE
 	ret = gpmi_nand_init(this);
 	if (ret)
 		goto exit_nfc_init;
 
+	FUNCTION_TRACE
 	dev_info(this->dev, "driver registered.\n");
 
 	return 0;
