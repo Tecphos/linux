@@ -28,8 +28,6 @@
 		compatible = "generic-uio";
 		interrupts = < 14 IRQ_TYPE_EDGE_RISING >;
 		interrupt-parent = <&gpio6>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&pinctrl_fpga>;
 	};
 
 	bcmdhd_wlan_0: bcmdhd_wlan@0 {
@@ -190,14 +188,8 @@
                                 MX6QDL_PAD_NANDF_D6__NAND_DATA06   0xb0b1
                                 MX6QDL_PAD_NANDF_D7__NAND_DATA07   0xb0b1
                                 MX6QDL_PAD_SD4_DAT0__NAND_DQS      0x00b1
-                        >;
-                };
-        };
-	fpga {
-                pinctrl_fpga: fpga_int {
-                        fsl,pins = <
                                 MX6QDL_PAD_NANDF_CS1__GPIO6_IO14   0x1b0b0
                         >;
                 };
-        };
+	};
 };
