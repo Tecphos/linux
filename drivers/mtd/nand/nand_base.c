@@ -31,6 +31,7 @@
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#define NAND_TWEAK
 #define FUNCTION_START pr_debug("Fun %s line %d: FUNCTION_START\n", __func__, __LINE__);
 #define FUNCTION_STOP pr_debug("Fun %s line %d: FUNCTION_STOP\n", __func__, __LINE__);
 #define FUNCTION_TRACE pr_debug("Fun %s line %d: FUNCTION_TRACE\n", __func__, __LINE__);
@@ -734,12 +735,14 @@ FUNCTION_START
 		column += mtd->writesize;
 		command = NAND_CMD_READ0;
 	}
+	//WALTER avoid latch
+	#ifndef NAND_TWEAK
 
-	/* Command latch cycle */
 	chip->cmd_ctrl(mtd, command, NAND_NCE | NAND_CLE | NAND_CTRL_CHANGE);
 
 	pr_debug("Fun %s line %d: latching\n", __func__, __LINE__);
 
+	/* Command latch cycle */
 	if (column != -1 || page_addr != -1) {
 		int ctrl = NAND_CTRL_CHANGE | NAND_NCE | NAND_ALE;
 
@@ -764,6 +767,7 @@ FUNCTION_START
 		}
 	}
 	chip->cmd_ctrl(mtd, NAND_CMD_NONE, NAND_NCE | NAND_CTRL_CHANGE);
+	#endif
 
 	/*
 	 * Program and erase have their own busy handlers status, sequential
@@ -815,6 +819,11 @@ FUNCTION_START
 		 * If we don't have access to the busy pin, we apply the given
 		 * command delay.
 		 */
+		#ifdef NAND_TWEAK
+			pr_debug("Fun %s line %d: NAND_TWEAK\n", __func__, __LINE__);
+FUNCTION_STOP
+			return;
+		#endif
 		if (!chip->dev_ready) {
 			udelay(chip->chip_delay);
 FUNCTION_STOP
@@ -1657,7 +1666,10 @@ FUNCTION_START
 						 __func__, buf);
 
 read_retry:
-			chip->cmdfunc(mtd, NAND_CMD_READ0, 0x00, page);
+			//WALTER improve reading
+			#ifndef NAND_TWEAK
+				chip->cmdfunc(mtd, NAND_CMD_READ0, 0x00, page);
+			#endif
 
 			/*
 			 * Now read the page into the buffer.  Absent an error,
@@ -1675,13 +1687,15 @@ read_retry:
 			else
 				ret = chip->ecc.read_page(mtd, chip, bufpoi,
 							  oob_required, page);
+			#ifndef NAND_TWEAK
+			pr_debug("Fun %s line %d: NAND_TWEAK\n", __func__, __LINE__);
 			if (ret < 0) {
 				if (use_bufpoi)
 					/* Invalidate page cache */
 					chip->pagebuf = -1;
 				break;
 			}
-
+			#endif
 			max_bitflips = max_t(unsigned int, max_bitflips, ret);
 
 			/* Transfer not aligned data */
@@ -1698,6 +1712,8 @@ read_retry:
 				memcpy(buf, chip->buffers->databuf + col, bytes);
 			}
 
+			#ifndef NAND_TWEAK
+			pr_debug("Fun %s line %d: NAND_TWEAK\n", __func__, __LINE__);
 			if (unlikely(oob)) {
 				int toread = min(oobreadlen, max_oobsize);
 
@@ -1732,7 +1748,7 @@ read_retry:
 					ecc_fail = true;
 				}
 			}
-
+			#endif
 			buf += bytes;
 		} else {
 			memcpy(buf, chip->buffers->databuf + col, bytes);
@@ -2368,7 +2384,9 @@ static int nand_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 	if (!cached || !NAND_HAS_CACHEPROG(chip)) {
 
 		chip->cmdfunc(mtd, NAND_CMD_PAGEPROG, -1, -1);
+		#ifndef NAND_TWEAK
 		status = chip->waitfunc(mtd, chip);
+		#endif
 		/*
 		 * See if operation failed and additional status checks are
 		 * available.
@@ -2486,10 +2504,12 @@ static int nand_do_write_ops(struct mtd_info *mtd, loff_t to,
 	chip->select_chip(mtd, chipnr);
 
 	/* Check, if it is write protected */
+	#ifndef NAND_TWEAK
 	if (nand_check_wp(mtd)) {
 		ret = -EIO;
 		goto err_out;
 	}
+	#endif
 
 	realpage = (int)(to >> chip->page_shift);
 	page = realpage & chip->pagemask;
