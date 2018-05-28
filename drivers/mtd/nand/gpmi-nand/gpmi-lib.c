@@ -1138,6 +1138,18 @@ FUNCTION_STOP
 	reg = BM_GPMI_CTRL1_RDN_DELAY | BM_GPMI_CTRL1_HALF_PERIOD;
 	writel(reg, gpmi_regs + HW_GPMI_CTRL1_CLR);
 
+	// WALTER test timing
+	#if 0
+
+	reg = readl(r->gpmi_regs + HW_GPMI_TIMING2);
+	dev_err(this->dev, "Timing 2 value: 0x%x\n", reg);
+	writel(0x03023336, r->gpmi_regs + HW_GPMI_TIMING2);
+	//writel(0x00011111, r->gpmi_regs + HW_GPMI_TIMING2);
+	reg = readl(r->gpmi_regs + HW_GPMI_TIMING2);
+	dev_err(this->dev, "Timing 2 value: 0x%x\n", reg);
+
+	#endif
+
 	/* If no sample delay is called for, return immediately. */
 	if (!hw.sample_delay_factor){
 FUNCTION_STOP

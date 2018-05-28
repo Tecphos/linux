@@ -28,15 +28,97 @@
 #include <linux/of_mtd.h>
 #include <linux/busfreq-imx.h>
 #include <linux/pm_runtime.h>
+#include <linux/delay.h>
+#include <linux/kthread.h>
+#include <linux/semaphore.h>
 #include "gpmi-nand.h"
 #include "bch-regs.h"
+#include <linux/jiffies.h>
+
+//#define pr_debug pr_err
+#define pr_walter pr_err
+//#define pr_walter pr_debug
+
+//#define FPGA_IRQ
+//#define FPGA_IRQ_THREAD 0
+//#define FPGA_IRQ_MODE 0
+#define FORCE_INITIAL_READ
 
 /* Resource names for the GPMI NAND driver. */
 #define GPMI_NAND_GPMI_REGS_ADDR_RES_NAME  "gpmi-nand"
 #define GPMI_NAND_BCH_REGS_ADDR_RES_NAME   "bch"
 #define GPMI_NAND_BCH_INTERRUPT_RES_NAME   "bch"
+#define GPMI_NAND_FPGA_IRQERRUPT_RES_NAME   "fpga"
 
 #define GPMI_RPM_TIMEOUT	50 /* ms */
+
+#ifdef FPGA_IRQ
+DEFINE_SPINLOCK(fpga_lock);
+DEFINE_SPINLOCK(fpga_lock2);
+DEFINE_MUTEX(fpga_mutex);
+ktime_t lasttime;
+
+enum {
+	IRQ_ENABLED = 0,
+};
+
+static struct workqueue_struct *fpga_wq;
+
+struct fpga_work_data{
+	struct work_struct fpga_work;
+	struct gpmi_nand_data *this;
+};
+
+static void fpga_work_handler(struct work_struct *work)
+{
+    struct fpga_work_data * data = (struct fpga_work_data *)work;
+	struct gpmi_nand_data *this = data->this;
+	struct nand_chip *chip = &this->nand;
+	struct mtd_info	*mtd = &this->mtd;
+	uint64_t *buf = (uint64_t *)this->data_buffer_dma;
+	unsigned long flags;
+	struct completion *dma_c = &this->dma_done;
+	unsigned long timeout;
+
+	pr_err("Fun %s line %d: FPGA work\n", __func__, __LINE__),
+
+	#if FPGA_IRQ_MODE == 0
+	//pr_walter("Fun %s line %d: FPGA IRQ command\n", __func__, __LINE__);
+
+	//chip->cmdfunc(mtd, NAND_CMD_READ0, 0, 0);
+
+	pr_walter("Fun %s line %d: FPGA work read\n", __func__, __LINE__);
+
+	chip->read_buf(mtd, (uint8_t *)buf, mtd->writesize);
+
+	#else
+
+	pr_walter("Fun %s line %d: FPGA work processing DMA\n", __func__, __LINE__);
+
+	/* Wait for the interrupt from the DMA block. */
+	timeout = wait_for_completion_timeout(dma_c, msecs_to_jiffies(1000));
+	if (!timeout) {
+		dev_err(this->dev, "DMA timeout, last DMA :%d\n",
+			this->last_dma_type);
+		gpmi_dump_info(this);
+	}
+
+	#endif
+
+	pr_walter("Fun %s line %d: FPGA work enabling IRQ\n", __func__, __LINE__);
+
+	spin_lock(&fpga_lock);
+	//spin_lock_irqsave(&fpga_lock, flags);
+	if (!__test_and_set_bit(IRQ_ENABLED, &this->fpga_irq_enabled)){
+		enable_irq(this->fpga_irq);
+	}
+	//spin_unlock_irqrestore(&fpga_lock, flags);
+	spin_unlock(&fpga_lock);
+
+    kfree(data);
+}
+
+#endif
 
 /* add our owner bbt descriptor */
 static uint8_t scan_ff_pattern[] = { 0xff };
@@ -113,6 +195,194 @@ static irqreturn_t bch_irq(int irq, void *cookie)
 	complete(&this->bch_done);
 	return IRQ_HANDLED;
 }
+
+#ifdef FPGA_IRQ
+#if FPGA_IRQ_THREAD == 1
+static int fpga_thread_fn(void *data)
+{
+	//#define BUFF_LEN 1472
+	#define BUFF_LEN 100
+	struct gpmi_nand_data *this = data;
+	struct nand_chip *chip = &this->nand;
+	struct mtd_info	*mtd = &this->mtd;
+	//uint64_t *buf = (uint64_t *)this->data_buffer_dma;
+	char byte[16];
+	uint8_t *buf;
+	uint8_t *tmp;
+	unsigned long flags;
+	struct sched_param param = { 0, };
+
+	buf = kzalloc(BUFF_LEN, GFP_KERNEL);
+	tmp = kzalloc(BUFF_LEN, GFP_KERNEL);
+
+	if (!mtd){
+		dev_err(this->dev, "Trying to handle FPGA request with invalid mtd\n");
+		return -1;
+	}
+
+	if (!buf){
+		dev_err(this->dev, "Trying to handle FPGA request with invalid buff\n");
+		return -1;
+	}
+
+	param.sched_priority = MAX_USER_RT_PRIO/2;
+	//param.sched_priority = 0;
+	sched_setscheduler(current, SCHED_FIFO, &param);
+	current->flags |= PF_NOFREEZE;
+
+	pr_walter("Fun %s line %d: FPGA thread start\n", __func__, __LINE__);
+
+	pr_walter("Fun %s line %d: FPGA thread chip select\n", __func__, __LINE__);
+
+	chip->select_chip(mtd, 0);
+
+	while (!kthread_should_stop()){
+		#if FPGA_IRQ_MODE == 1
+		set_current_state(TASK_INTERRUPTIBLE);
+		#endif
+
+		pr_walter("Fun %s line %d: FPGA thread enabling IRQ\n", __func__, __LINE__);
+
+		spin_lock(&fpga_lock);
+		//spin_lock_irqsave(&fpga_lock, flags);
+		if (!__test_and_set_bit(IRQ_ENABLED, &this->fpga_irq_enabled)){
+			enable_irq(this->fpga_irq);
+		}
+		//spin_unlock_irqrestore(&fpga_lock, flags);
+		spin_unlock(&fpga_lock);
+
+		pr_walter("Fun %s line %d: FPGA thread loop sleep\n", __func__, __LINE__);
+
+		#if FPGA_IRQ_MODE == 0
+		mutex_lock(&fpga_mutex);
+		#elif FPGA_IRQ_MODE == 1
+		schedule();
+		#endif
+
+		//pr_err("Fun %s line %d: FPGA thread loop wakeup took %lld\n", __func__, __LINE__, ktime_us_delta(ktime_get(), lasttime));
+
+		#if 0
+
+		pr_walter("Fun %s line %d: FPGA thread chip %d size %d\n", __func__, __LINE__,  this->current_chip,  mtd->writesize);
+
+		pr_walter("Fun %s line %d: FPGA thread command\n", __func__, __LINE__);
+
+		chip->cmdfunc(mtd, NAND_CMD_READ0, 0, 0);
+
+		//ndelay(100);
+
+		#endif
+
+		pr_walter("Fun %s line %d: FPGA thread read start took %lld\n", __func__, __LINE__, ktime_us_delta(ktime_get(), lasttime));
+
+		//chip->read_buf(mtd, (uint8_t *)buf, mtd->writesize);
+		chip->read_buf(mtd, (uint8_t *)buf, BUFF_LEN);
+
+		pr_walter("Fun %s line %d: FPGA thread read took %lld\n", __func__, __LINE__, ktime_us_delta(ktime_get(), lasttime));
+
+		#if 1
+		memset(byte, 0, 16);
+		memset(tmp, 0, BUFF_LEN);
+		int i = 0;
+		for (i=0; i<64; i++){
+			sprintf(byte, "%02X", buf[i]);
+			strcat(tmp, byte);
+		}
+		pr_walter("Fun %s line %d: buf: %s\n", __func__, __LINE__, tmp);
+		#endif
+
+		pr_walter("Fun %s line %d: FPGA thread dump took %lld\n", __func__, __LINE__, ktime_us_delta(ktime_get(), lasttime));
+
+		ndelay(100);
+
+	}
+
+	return 0;
+}
+#endif //FPGA_IRQ_THREAD
+
+static irqreturn_t fpga_irq_fn(int irq, void *cookie)
+{
+	struct platform_device *pdev = cookie;
+	struct gpmi_nand_data *this = platform_get_drvdata(pdev);
+	//struct gpmi_nand_data *this = cookie;
+	struct nand_chip *chip = &this->nand;
+	struct mtd_info	*mtd = &this->mtd;
+	uint64_t *buf = (uint64_t *)this->data_buffer_dma;
+	unsigned long flags;
+
+	lasttime = ktime_get();
+
+	//pr_walter("Fun %s line %d: FPGA IRQ start pdev %p this %p fpga_irq %d\n", __func__, __LINE__, cookie, this, this->fpga_irq);
+	pr_walter("Fun %s line %d: FPGA IRQ start, disabling IRQ\n", __func__, __LINE__);
+
+	spin_lock(&fpga_lock);
+	//spin_lock_irqsave(&fpga_lock, flags);
+	pr_walter("Fun %s line %d: FPGA IRQ\n", __func__, __LINE__);
+	if (__test_and_clear_bit(IRQ_ENABLED, &this->fpga_irq_enabled)){
+		disable_irq_nosync(this->fpga_irq);
+		enable_irq(this->fpga_irq);
+	}
+	//spin_unlock_irqrestore(&fpga_lock, flags);
+	spin_unlock(&fpga_lock);
+
+	pr_walter("Fun %s line %d: FPGA IRQ wake up, last took %lld\n", __func__, __LINE__, ktime_us_delta(ktime_get(), lasttime));
+
+	#if FPGA_IRQ_THREAD == 1
+
+	#if FPGA_IRQ_MODE == 0
+	mutex_unlock(&fpga_mutex);
+	#elif FPGA_IRQ_MODE == 1
+	wake_up_process(this->fpga_thread);
+	#endif
+
+	#if 0
+	if (this->fpga_thread && this->fpga_thread->state != TASK_RUNNING){
+		pr_walter("Fun %s line %d: Waking up FPGA thread\n", __func__, __LINE__);
+		wake_up_process(this->fpga_thread);
+	}
+	#endif
+
+	#else //FPGA_IRQ_THREAD
+
+	#if FPGA_IRQ_MODE == 0
+
+    struct fpga_work_data * data;
+
+    data = kmalloc(sizeof(struct fpga_work_data), GFP_KERNEL);
+    INIT_WORK(&data->fpga_work, fpga_work_handler);
+    queue_work(fpga_wq, &data->fpga_work);
+
+	#elif FPGA_IRQ_MODE == 1
+
+	spin_lock(&fpga_lock);
+
+	//pr_walter("Fun %s line %d: FPGA IRQ command\n", __func__, __LINE__);
+
+	//chip->cmdfunc(mtd, NAND_CMD_READ0, 0, 0);
+
+	pr_walter("Fun %s line %d: FPGA IRQ read\n", __func__, __LINE__);
+
+	chip->read_buf(mtd, (uint8_t *)buf, mtd->writesize);
+
+	pr_walter("Fun %s line %d: FPGA IRQ processing\n", __func__, __LINE__);
+
+    struct fpga_work_data * data;
+
+    data = kmalloc(sizeof(struct fpga_work_data), GFP_KERNEL);
+    INIT_WORK(&data->fpga_work, fpga_work_handler);
+    queue_work(fpga_wq, &data->fpga_work);
+
+	spin_unlock(&fpga_lock);
+
+	#endif
+	#endif //FPGA_IRQ_THREAD
+
+	pr_walter("Fun %s line %d: FPGA IRQ stop, last took %lld\n", __func__, __LINE__, ktime_us_delta(ktime_get(), lasttime));
+
+	return IRQ_HANDLED;
+}
+#endif
 
 /*
  *  Calculate the ECC strength by hand:
@@ -664,6 +934,12 @@ int start_dma_without_bch_irq(struct gpmi_nand_data *this,
 	dmaengine_submit(desc);
 	dma_async_issue_pending(get_dma_chan(this));
 
+	#ifdef FPGA_IRQ
+	#if FPGA_IRQ_THREAD == 0 && FPGA_IRQ_MODE == 1
+	return 0;
+	#endif
+	#endif
+
 	/* Wait for the interrupt from the DMA block. */
 	timeout = wait_for_completion_timeout(dma_c, msecs_to_jiffies(1000));
 	if (!timeout) {
@@ -741,12 +1017,61 @@ static int acquire_bch_irq(struct gpmi_nand_data *this, irq_handler_t irq_h)
 		return -ENODEV;
 	}
 
+	dev_err(this->dev, "BCH IRQ %d\n", r->start);
+
 	err = devm_request_irq(this->dev, r->start, irq_h, 0, res_name, this);
 	if (err)
 		dev_err(this->dev, "error requesting BCH IRQ\n");
 
+	#if 0
+
+	pr_walter("Fun %s line %d: FUNCTION_TRACE\n", __func__, __LINE__);
+
+	int irq;
+	err = 0;
+	irq = platform_get_irq(pdev, 0);
+	dev_err(this->dev, "BCH IRQ %d\n", irq);
+
+	pr_walter("Fun %s line %d: FUNCTION_TRACE\n", __func__, __LINE__);
+
+	err = request_irq(irq, irq_h, 4, res_name, this->dev);
+	if (err)
+		dev_err(this->dev, "error requesting BCH IRQ\n");
+
+	#endif
+
+	pr_walter("Fun %s line %d: FUNCTION_TRACE\n", __func__, __LINE__);
+
 	return err;
 }
+
+#ifdef FPGA_IRQ
+static int acquire_fpga_irq(struct gpmi_nand_data *this, irq_handler_t irq_h)
+{
+	struct platform_device *pdev = this->pdev;
+	const char *res_name = GPMI_NAND_FPGA_IRQERRUPT_RES_NAME;
+	struct resource *r;
+	int err  = 0;
+
+	pr_walter("Fun %s line %d: FUNCTION_TRACE\n", __func__, __LINE__);
+
+
+	this->fpga_irq = platform_get_irq(pdev, 1);
+	dev_err(this->dev, "FPGA IRQ %d\n", this->fpga_irq);
+
+	pr_walter("Fun %s line %d: FUNCTION_TRACE\n", __func__, __LINE__);
+
+	this->fpga_irq_enabled = 1;
+	err = request_irq(this->fpga_irq, irq_h, 1, res_name, this->pdev);
+	if (err)
+		dev_err(this->dev, "error requesting FPGA IRQ\n");
+
+	//enable_irq(this->fpga_irq);
+
+	pr_walter("Fun %s line %d: FUNCTION_TRACE\n", __func__, __LINE__);
+	return err;
+}
+#endif
 
 static void release_dma_channels(struct gpmi_nand_data *this)
 {
@@ -2450,6 +2775,31 @@ static int gpmi_nand_probe(struct platform_device *pdev)
 	if (ret)
 		goto exit_nfc_init;
 
+#ifdef FORCE_INITIAL_READ
+	struct nand_chip *chip = &this->nand;
+	struct mtd_info	*mtd = &this->mtd;
+	chip->select_chip(mtd, 0);
+	chip->cmdfunc(mtd, NAND_CMD_READ0, 0, 0);
+#endif
+
+#ifdef FPGA_IRQ
+	pr_walter("Fun %s line %d: Preparing FPGA wq\n", __func__, __LINE__);
+    fpga_wq = create_workqueue("fpga_wq");
+	#if FPGA_IRQ_THREAD == 1
+	pr_walter("Fun %s line %d: Preparing FPGA thread\n", __func__, __LINE__);
+	this->fpga_thread = kthread_create(fpga_thread_fn, this, "fpga_thread");
+	pr_walter("Fun %s line %d: FPGA thread %p\n", __func__, __LINE__, this->fpga_thread);
+	#endif
+	pr_walter("Fun %s line %d: Acquiring FPGA IRQ\n", __func__, __LINE__);
+	pr_walter("Fun %s line %d: gpmi_data %p, dev %p, pdev %p\n", __func__, __LINE__, this, this->dev, this->pdev);
+	ret = acquire_fpga_irq(this, fpga_irq_fn);
+	if (ret)
+		goto exit_nfc_init;
+	#if FPGA_IRQ_THREAD == 1
+	wake_up_process(this->fpga_thread);
+	#endif
+#endif
+
 	FUNCTION_TRACE
 	dev_info(this->dev, "driver registered.\n");
 
@@ -2465,6 +2815,19 @@ exit_acquire_resources:
 static int gpmi_nand_remove(struct platform_device *pdev)
 {
 	struct gpmi_nand_data *this = platform_get_drvdata(pdev);
+
+#ifdef FPGA_IRQ
+	pr_walter("Fun %s line %d: Freeing IRQ %d\n", __func__, __LINE__, this->fpga_irq);
+	free_irq(this->fpga_irq, this->dev);
+	pr_walter("Fun %s line %d: Freeing workqueue\n", __func__, __LINE__);
+	flush_workqueue(fpga_wq);
+	destroy_workqueue(fpga_wq);
+	#if FPGA_IRQ_THREAD == 1
+	pr_walter("Fun %s line %d: Stopping thread\n", __func__, __LINE__);
+	kthread_stop(this->fpga_thread);
+	mdelay(1);
+	#endif
+#endif
 
 	gpmi_nand_exit(this);
 	pm_runtime_disable(this->dev);

@@ -216,6 +216,10 @@ struct gpmi_nand_data {
 	enum dma_ops_type	dma_type;
 	struct completion	dma_done;
 
+
+	int                 fpga_irq;
+	unsigned long       fpga_irq_enabled;
+	struct task_struct  *fpga_thread;
 	/* private */
 	void			*private;
 };
