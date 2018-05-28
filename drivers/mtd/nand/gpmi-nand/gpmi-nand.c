@@ -2281,7 +2281,7 @@ static int gpmi_init_last(struct gpmi_nand_data *this)
 	 * We do not check the return value now. That's means if we fail in
 	 * enable the extra features, we still can run in the normal way.
 	 */
-	gpmi_extra_init(this);
+	//gpmi_extra_init(this);
 
 	return 0;
 }
